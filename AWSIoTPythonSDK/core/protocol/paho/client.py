@@ -16,6 +16,7 @@
 This is an MQTT v3.1 client module. MQTT is a lightweight pub/sub messaging
 protocol that is easy to implement and suitable for low powered devices.
 """
+import logging
 import errno
 import platform
 import random
@@ -54,6 +55,8 @@ else:
 import AWSIoTPythonSDK.core.protocol.paho.securedWebsocket.securedWebsocketCore as wssCore
 import AWSIoTPythonSDK.core.util.progressiveBackoffCore as backoffCore
 import AWSIoTPythonSDK.core.util.offlinePublishQueue as offlinePublishQueue
+
+log = logging.getLogger(__name__)
 
 VERSION_MAJOR=1
 VERSION_MINOR=0
@@ -2443,7 +2446,11 @@ class Client(object):
         self._callback_mutex.release()
 
     def _thread_main(self):
-        self.loop_forever(retry_first_connection=True)
+        while self._thread_terminate is False:
+            try:
+                self.loop_forever(retry_first_connection=True)
+            except Exception as ex:
+                log.exception('Force restart IoT client after exception:')
 
     def _host_matches_cert(self, host, cert_host):
         if cert_host[0:2] == "*.":
