@@ -86,21 +86,18 @@ class mqttCore:
     # Should leave it to the next round of reconnect/resubscribe/republish logic at mqttCore
     def _doPublishDraining(self):
         while True:
-            self._offlinePublishQueueLock.acquire()
-            # This should be a complete publish requests containing topic, payload, qos, retain information
-            # This is the only thread that pops the offlinePublishQueue
-            if self._offlinePublishQueue:
-                queuedPublishRequest = self._offlinePublishQueue.pop(0)
-                # Publish it (call paho API directly)
-                (rc, mid) = self._pahoClient.publish(queuedPublishRequest.topic, queuedPublishRequest.payload, queuedPublishRequest.qos, queuedPublishRequest.retain)
-                if rc != 0:
-                    self._offlinePublishQueueLock.release()
+            with self._offlinePublishQueueLock:
+                # This should be a complete publish requests containing topic, payload, qos, retain information
+                # This is the only thread that pops the offlinePublishQueue
+                if self._offlinePublishQueue:
+                    queuedPublishRequest = self._offlinePublishQueue.pop(0)
+                    # Publish it (call paho API directly)
+                    (rc, mid) = self._pahoClient.publish(queuedPublishRequest.topic, queuedPublishRequest.payload, queuedPublishRequest.qos, queuedPublishRequest.retain)
+                    if rc != 0:
+                        break
+                else:
+                    self._drainingComplete = True
                     break
-            else:
-                self._drainingComplete = True
-                self._offlinePublishQueueLock.release()
-                break
-            self._offlinePublishQueueLock.release()
             time.sleep(self._drainingIntervalSecond)
 
     # Callbacks
@@ -363,18 +360,16 @@ class mqttCore:
         # Publish to Paho
         else:
             self._offlinePublishQueueLock.release()
-            self._publishLock.acquire()
-            # Publish
-            (rc, mid) = self._pahoClient.publish(topic, payload, qos, retain)  # Throw exception...
-            self._log.debug("Try to put a publish request " + str(mid) + " in the TCP stack.")
-            ret = rc == 0
-            if(ret):
-                self._log.debug("Publish request " + str(mid) + " succeeded.")
-            else:
-                self._log.error("Publish request " + str(mid) + " failed with code: " + str(rc))
-                self._publishLock.release()  # Release the lock when exception is raised
-                raise publishError(rc)
-            self._publishLock.release()
+            with self._publishLock:
+                # Publish
+                (rc, mid) = self._pahoClient.publish(topic, payload, qos, retain)  # Throw exception...
+                self._log.debug("Try to put a publish request " + str(mid) + " in the TCP stack.")
+                ret = rc == 0
+                if(ret):
+                    self._log.debug("Publish request " + str(mid) + " succeeded.")
+                else:
+                    self._log.error("Publish request " + str(mid) + " failed with code: " + str(rc))
+                    raise publishError(rc)
         return ret
 
     def subscribe(self, topic, qos, callback):
@@ -383,40 +378,37 @@ class mqttCore:
             raise TypeError("None type inputs detected.")
         # Return subscribe succeeded/failed
         ret = False
-        self._subscribeLock.acquire()
-        # Subscribe
-        # Register callback
-        if(callback is not None):
-            self._pahoClient.message_callback_add(topic, callback)
-        (rc, mid) = self._pahoClient.subscribe(topic, qos)  # Throw exception...
-        self._log.debug("Started a subscribe request " + str(mid))
-        TenmsCount = 0
-        while(TenmsCount != self._mqttOperationTimeout * 100 and not self._subscribeSent):
-            TenmsCount += 1
-            time.sleep(0.01)
-        if(self._subscribeSent):
-            ret = rc == 0
-            if(ret):
-                self._subscribePool[topic] = (qos, callback)
-                self._log.debug("Subscribe request " + str(mid) + " succeeded. Time consumption: " + str(float(TenmsCount) * 10) + "ms.")
+        with self._subscribeLock:
+            # Subscribe
+            # Register callback
+            if(callback is not None):
+                self._pahoClient.message_callback_add(topic, callback)
+            (rc, mid) = self._pahoClient.subscribe(topic, qos)  # Throw exception...
+            self._log.debug("Started a subscribe request " + str(mid))
+            TenmsCount = 0
+            while(TenmsCount != self._mqttOperationTimeout * 100 and not self._subscribeSent):
+                TenmsCount += 1
+                time.sleep(0.01)
+            if(self._subscribeSent):
+                ret = rc == 0
+                if(ret):
+                    self._subscribePool[topic] = (qos, callback)
+                    self._log.debug("Subscribe request " + str(mid) + " succeeded. Time consumption: " + str(float(TenmsCount) * 10) + "ms.")
+                else:
+                    if(callback is not None):
+                        self._pahoClient.message_callback_remove(topic)
+                    self._log.error("Subscribe request " + str(mid) + " failed with code: " + str(rc))
+                    self._log.debug("Callback cleaned up.")
+                    raise subscribeError(rc)
             else:
+                # Subscribe timeout
                 if(callback is not None):
                     self._pahoClient.message_callback_remove(topic)
-                self._log.error("Subscribe request " + str(mid) + " failed with code: " + str(rc))
+                self._log.error("No feedback detected for subscribe request " + str(mid) + ". Timeout and failed.")
                 self._log.debug("Callback cleaned up.")
-                self._subscribeLock.release()  # Release the lock when exception is raised
-                raise subscribeError(rc)
-        else:
-            # Subscribe timeout
-            if(callback is not None):
-                self._pahoClient.message_callback_remove(topic)
-            self._log.error("No feedback detected for subscribe request " + str(mid) + ". Timeout and failed.")
-            self._log.debug("Callback cleaned up.")
-            self._subscribeLock.release()  # Release the lock when exception is raised
-            raise subscribeTimeoutException()
-        self._subscribeSent = False
-        self._log.debug("Recover subscribe context for the next request: subscribeSent: " + str(self._subscribeSent))
-        self._subscribeLock.release()
+                raise subscribeTimeoutException()
+            self._subscribeSent = False
+            self._log.debug("Recover subscribe context for the next request: subscribeSent: " + str(self._subscribeSent))
         return ret
 
     def unsubscribe(self, topic):
@@ -426,34 +418,31 @@ class mqttCore:
         self._log.debug("unsubscribe from: " + topic)
         # Return unsubscribe succeeded/failed
         ret = False
-        self._unsubscribeLock.acquire()
-        # Unsubscribe
-        (rc, mid) = self._pahoClient.unsubscribe(topic)  # Throw exception...
-        self._log.debug("Started an unsubscribe request " + str(mid))
-        TenmsCount = 0
-        while(TenmsCount != self._mqttOperationTimeout * 100 and not self._unsubscribeSent):
-            TenmsCount += 1
-            time.sleep(0.01)
-        if(self._unsubscribeSent):
-            ret = rc == 0
-            if(ret):
-                try:
-                    del self._subscribePool[topic]
-                except KeyError:
-                    pass  # Ignore topics that are never subscribed to
-                self._log.debug("Unsubscribe request " + str(mid) + " succeeded. Time consumption: " + str(float(TenmsCount) * 10) + "ms.")
-                self._pahoClient.message_callback_remove(topic)
-                self._log.debug("Remove the callback.")
+        with self._unsubscribeLock:
+            # Unsubscribe
+            (rc, mid) = self._pahoClient.unsubscribe(topic)  # Throw exception...
+            self._log.debug("Started an unsubscribe request " + str(mid))
+            TenmsCount = 0
+            while(TenmsCount != self._mqttOperationTimeout * 100 and not self._unsubscribeSent):
+                TenmsCount += 1
+                time.sleep(0.01)
+            if(self._unsubscribeSent):
+                ret = rc == 0
+                if(ret):
+                    try:
+                        del self._subscribePool[topic]
+                    except KeyError:
+                        pass  # Ignore topics that are never subscribed to
+                    self._log.debug("Unsubscribe request " + str(mid) + " succeeded. Time consumption: " + str(float(TenmsCount) * 10) + "ms.")
+                    self._pahoClient.message_callback_remove(topic)
+                    self._log.debug("Remove the callback.")
+                else:
+                    self._log.error("Unsubscribe request " + str(mid) + " failed with code: " + str(rc))
+                    raise unsubscribeError(rc)
             else:
-                self._log.error("Unsubscribe request " + str(mid) + " failed with code: " + str(rc))
-                self._unsubscribeLock.release()  # Release the lock when exception is raised
-                raise unsubscribeError(rc)
-        else:
-            # Unsubscribe timeout
-            self._log.error("No feedback detected for unsubscribe request " + str(mid) + ". Timeout and failed.")
-            self._unsubscribeLock.release()  # Release the lock when exception is raised
-            raise unsubscribeTimeoutException()
-        self._unsubscribeSent = False
-        self._log.debug("Recover unsubscribe context for the next request: unsubscribeSent: " + str(self._unsubscribeSent))
-        self._unsubscribeLock.release()
+                # Unsubscribe timeout
+                self._log.error("No feedback detected for unsubscribe request " + str(mid) + ". Timeout and failed.")
+                raise unsubscribeTimeoutException()
+            self._unsubscribeSent = False
+            self._log.debug("Recover unsubscribe context for the next request: unsubscribeSent: " + str(self._unsubscribeSent))
         return ret

@@ -65,24 +65,21 @@ class shadowManager:
         self._mqttCoreHandler.publish(currentShadowAction.getTopicGeneral(), srcPayload, 0, False)
 
     def basicShadowSubscribe(self, srcShadowName, srcShadowAction, srcCallback):
-        self._shadowSubUnsubOperationLock.acquire()
-        currentShadowAction = _shadowAction(srcShadowName, srcShadowAction)
-        if currentShadowAction.isDelta:
-            self._mqttCoreHandler.subscribe(currentShadowAction.getTopicDelta(), 0, srcCallback)
-        else:
-            self._mqttCoreHandler.subscribe(currentShadowAction.getTopicAccept(), 0, srcCallback)
-            self._mqttCoreHandler.subscribe(currentShadowAction.getTopicReject(), 0, srcCallback)
-        time.sleep(2)
-        self._shadowSubUnsubOperationLock.release()
+        with self._shadowSubUnsubOperationLock:
+            currentShadowAction = _shadowAction(srcShadowName, srcShadowAction)
+            if currentShadowAction.isDelta:
+                self._mqttCoreHandler.subscribe(currentShadowAction.getTopicDelta(), 0, srcCallback)
+            else:
+                self._mqttCoreHandler.subscribe(currentShadowAction.getTopicAccept(), 0, srcCallback)
+                self._mqttCoreHandler.subscribe(currentShadowAction.getTopicReject(), 0, srcCallback)
 
     def basicShadowUnsubscribe(self, srcShadowName, srcShadowAction):
-        self._shadowSubUnsubOperationLock.acquire()
-        currentShadowAction = _shadowAction(srcShadowName, srcShadowAction)
-        if currentShadowAction.isDelta:
-            self._mqttCoreHandler.unsubscribe(currentShadowAction.getTopicDelta())
-        else:
-            self._logger.debug(currentShadowAction.getTopicAccept())
-            self._mqttCoreHandler.unsubscribe(currentShadowAction.getTopicAccept())
-            self._logger.debug(currentShadowAction.getTopicReject())
-            self._mqttCoreHandler.unsubscribe(currentShadowAction.getTopicReject())
-        self._shadowSubUnsubOperationLock.release()
+        with self._shadowSubUnsubOperationLock:
+            currentShadowAction = _shadowAction(srcShadowName, srcShadowAction)
+            if currentShadowAction.isDelta:
+                self._mqttCoreHandler.unsubscribe(currentShadowAction.getTopicDelta())
+            else:
+                self._logger.debug(currentShadowAction.getTopicAccept())
+                self._mqttCoreHandler.unsubscribe(currentShadowAction.getTopicAccept())
+                self._logger.debug(currentShadowAction.getTopicReject())
+                self._mqttCoreHandler.unsubscribe(currentShadowAction.getTopicReject())
