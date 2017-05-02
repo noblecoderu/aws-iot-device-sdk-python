@@ -196,10 +196,11 @@ class deviceShadow:
             if not self._isPersistentSubscribe and self._shadowSubscribeStatusTable.get(srcActionName) <= 0:
                 self._shadowSubscribeStatusTable[srcActionName] = 0
                 self._shadowManagerHandler.basicShadowUnsubscribe(self._shadowName, srcActionName)
-            # Notify time-out issue
-            if self._shadowSubscribeCallbackTable.get(srcActionName) is not None:
-                self._logger.info("Shadow request with token: " + str(srcToken) + " has timed out.")
-                self._shadowSubscribeCallbackTable[srcActionName]("REQUEST TIME OUT", "timeout", srcToken)
+            callback = self._shadowSubscribeCallbackTable.get(srcActionName)
+        # Notify time-out issue
+        if self._shadowSubscribeCallbackTable.get(srcActionName) is not None:
+            self._logger.info("Shadow request with token: " + str(srcToken) + " has timed out.")
+            self._shadowSubscribeCallbackTable[srcActionName]("REQUEST TIME OUT", "timeout", srcToken)
 
     def shadowGet(self, srcCallback, srcTimeout):
         """
