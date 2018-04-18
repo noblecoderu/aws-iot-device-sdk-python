@@ -710,7 +710,7 @@ class Client(object):
 
         self._tls_insecure = value
 
-    def connect(self, host, port=1883, keepalive=60, bind_address=""):
+    def connect(self, host, port=1883, keepalive=60, bind_address="", proxy=None):
         """Connect to a remote broker.
 
         host is the hostname or IP address of the remote broker.
@@ -721,10 +721,10 @@ class Client(object):
         broker. If no other messages are being exchanged, this controls the
         rate at which the client will send ping messages to the broker.
         """
-        self.connect_async(host, port, keepalive, bind_address)
+        self.connect_async(host, port, keepalive, bind_address, proxy)
         return self.reconnect()
 
-    def connect_srv(self, domain=None, keepalive=60, bind_address=""):
+    def connect_srv(self, domain=None, keepalive=60, bind_address="", proxy=None):
         """Connect to a remote broker.
 
         domain is the DNS domain to search for SRV records; if None,
@@ -756,13 +756,13 @@ class Client(object):
             host, port, prio, weight = answer
 
             try:
-                return self.connect(host, port, keepalive, bind_address)
+                return self.connect(host, port, keepalive, bind_address, proxy)
             except:
                 pass
 
         raise ValueError("No SRV hosts responded")
 
-    def connect_async(self, host, port=1883, keepalive=60, bind_address=""):
+    def connect_async(self, host, port=1883, keepalive=60, bind_address="", proxy=None):
         """Connect to a remote broker asynchronously. This is a non-blocking
         connect call that can be used with loop_start() to provide very quick
         start.
@@ -784,9 +784,12 @@ class Client(object):
         if bind_address != "" and bind_address is not None:
             if (sys.version_info[0] == 2 and sys.version_info[1] < 7) or (sys.version_info[0] == 3 and sys.version_info[1] < 2):
                 raise ValueError('bind_address requires Python 2.7 or 3.2.')
+        if proxy is None:
+            proxy = []
 
         self._host = host
         self._port = port
+        self._proxy = proxy
         self._keepalive = keepalive
         self._bind_address = bind_address
 
@@ -846,8 +849,16 @@ class Client(object):
             else:
                 sock = socket.create_connection((self._host, self._port), source_address=(self._bind_address, 0))
         except socket.error as err:
-            if err.errno != errno.EINPROGRESS and err.errno != errno.EWOULDBLOCK and err.errno != EAGAIN:
-                raise
+            for proxy in self._proxy:
+                try:
+                    sock = socket.create_connection((proxy, self._port), source_address=(self._bind_address, 0))
+                    break
+                except socket.error:
+                    continue
+            else:
+                if err.errno != errno.EINPROGRESS and err.errno != errno.EWOULDBLOCK and err.errno != EAGAIN:
+                    raise
+        self._last_msg_in = self._last_msg_out = time_func()
 
         if self._tls_ca_certs is not None:
             if self._useSecuredWebsocket:

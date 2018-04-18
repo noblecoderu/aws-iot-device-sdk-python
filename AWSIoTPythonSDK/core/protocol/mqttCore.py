@@ -194,12 +194,15 @@ class mqttCore:
         self._drainingComplete = True
         self._log.debug("mqttCore init.")
 
-    def configEndpoint(self, srcHost, srcPort):
+    def configEndpoint(self, srcHost, srcPort, proxy=None):
         if srcHost is None or srcPort is None:
             self._log.error("configEndpoint: None type inputs detected.")
             raise TypeError("None type inputs detected.")
+        if proxy is None:
+            proxy = []
         self._host = srcHost
         self._port = srcPort
+        self._proxy = proxy
 
     def configCredentials(self, srcCAFile, srcKey, srcCert):
         if srcCAFile is None or srcKey is None or srcCert is None:
@@ -284,7 +287,7 @@ class mqttCore:
             self._pahoClient.tls_set(self._cafile, self._cert, self._key, ssl.CERT_REQUIRED, ssl.PROTOCOL_SSLv23)  # Throw exception...
             self._log.info("Connection type: TLSv1.2 Mutual Authentication")
         # Connect
-        self._pahoClient.connect(self._host, self._port, keepAliveInterval)  # Throw exception...
+        self._pahoClient.connect(self._host, self._port, keepAliveInterval, proxy=self._proxy)  # Throw exception...
         self._pahoClient.loop_start()
         TenmsCount = 0
         while(TenmsCount != self._connectdisconnectTimeout * 100 and self._connectResultCode == sys.maxsize):
