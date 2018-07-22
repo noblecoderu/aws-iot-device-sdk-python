@@ -254,7 +254,9 @@ class deviceShadow:
         # One publish
         self._shadowManagerHandler.basicShadowPublish(self._shadowName, "get", currentPayload)
         # Start the timer
-        self._tokenPool[currentToken].start()
+        with self._dataStructureLock:
+            if currentToken in self._tokenPool:
+                self._tokenPool[currentToken].start()
         return currentToken
 
     def shadowDelete(self, srcCallback, srcTimeout):
@@ -309,7 +311,9 @@ class deviceShadow:
         # One publish
         self._shadowManagerHandler.basicShadowPublish(self._shadowName, "delete", currentPayload)
         # Start the timer
-        self._tokenPool[currentToken].start()
+        with self._dataStructureLock:
+            if currentToken in self._tokenPool:
+                self._tokenPool[currentToken].start()
         return currentToken
 
     def shadowUpdate(self, srcJSONPayload, srcCallback, srcTimeout):
@@ -369,7 +373,9 @@ class deviceShadow:
             # One publish
             self._shadowManagerHandler.basicShadowPublish(self._shadowName, "update", JSONPayloadWithToken)
             # Start the timer
-            self._tokenPool[currentToken].start()
+            with self._dataStructureLock:
+                if currentToken in self._tokenPool:
+                    self._tokenPool[currentToken].start()
         else:
             raise ValueError("Invalid JSON file.")
         return currentToken
